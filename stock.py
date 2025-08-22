@@ -1,22 +1,23 @@
 import json
 import requests
 import time
-import logging
+import datetime
 
 PRODUCTS_FILE = "products.json"
 ZIPCODE = "560085"
-CHECK_INTERVAL = 10  # seconds
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-
-def check_croma_availability(item_id: str, zip_code: str) -> bool:
+def check_croma_availability(item_id: str, zip_code: str):
+    """
+    Returns:
+      True  -> In stock
+      False -> Out of stock
+      None  -> Error (do not print)
+    """
     url = "https://api.croma.com/inventory/oms/v2/tms/details-pwa/"
     headers = {
         "accept": "application/json, text/plain, */*",
         "content-type": "application/json",
-        "origin": "https://www.croma.com",
-        "referer": "https://www.croma.com/",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        "origin": "https://www.croma.com"
     }
 
     payload = {
@@ -59,8 +60,17 @@ def check_croma_availability(item_id: str, zip_code: str) -> bool:
 
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=10)
-        response.raise_for_status()
-        data = response.json()
+        if response.status_code != 200:
+            print(f"⚠️ API returned status {response.status_code} for item {item_id}")
+            return None
+
+        try:
+            data = response.json()
+        except ValueError:
+            print(f"⚠️ Invalid JSON response for item {item_id}")
+            return None
+
+        # Success → promiseLine list is non-empty
         promise_lines = (
             data.get("promise", {})
                 .get("suggestedOption", {})
@@ -68,43 +78,39 @@ def check_croma_availability(item_id: str, zip_code: str) -> bool:
                 .get("promiseLines", {})
                 .get("promiseLine", [])
         )
-        return len(promise_lines) > 0
+        
+        return True if len(promise_lines) > 0 else False
 
-    except requests.exceptions.HTTPError as e:
-        if response.status_code == 403:
-            logging.warning(f"403 Forbidden for item {item_id}. Possible block, rate limit, or authentication required.")
-        else:
-            logging.error(f"HTTP error for item {item_id}: {e}")
-        return False
-    except requests.exceptions.RequestException as e:
-        logging.warning(f"Request error for item {item_id}: {e}")
-        return False
     except Exception as e:
-        logging.error(f"Error for item {item_id}: {e}")
-        return False
+        print(f"⚠️ Error for item {item_id}: {e}")
+        return None
 
-def load_products():
-    with open(PRODUCTS_FILE, "r") as f:
-        return json.load(f)
 
 def check_all_stock(zip_code):
-    products = load_products()
+    # Load products.json
+    with open(PRODUCTS_FILE, "r") as f:
+        products = json.load(f)
+
+    print(f"\n=== Stock Check at {datetime.datetime.now()} ===")
     for product in products:
         if not product.get("enabled", False):
-            continue
+            continue  # skip disabled products
+
         item_id = product["id"]
         name = product["name"]
-        in_stock = check_croma_availability(item_id=item_id, zip_code=zip_code)
-        if in_stock:
-            logging.info(f"✅ In stock: {name} (ID: {item_id}) for Pincode: {zip_code}")
+
+        result = check_croma_availability(item_id=item_id, zip_code=zip_code)
+        if result is True:
+            print(f"✅ In stock: {name} (ID: {item_id}) for Pincode: {zip_code}")
+        elif result is False:
+            print(f"❌ Out of stock: {name} (ID: {item_id}) for Pincode: {zip_code}")
         else:
-            logging.info(f"❌ Out of stock: {name} (ID: {item_id}) for Pincode: {zip_code}")
+            # None -> Error, skip printing stock status
+            pass
+
 
 if __name__ == "__main__":
-    try:
-        while True:
-            check_all_stock(zip_code=ZIPCODE)
-            logging.info("CHECKED ALL\n")
-            time.sleep(CHECK_INTERVAL)
-    except KeyboardInterrupt:
-        logging.info("Script stopped by user.")
+    while True:
+        check_all_stock(zip_code=ZIPCODE)
+        print("CHECKED ALL\n")
+        time.sleep(10)
