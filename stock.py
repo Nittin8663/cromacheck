@@ -1,13 +1,10 @@
 import json
 import requests
 import time
-import logging
+
 
 PRODUCTS_FILE = "products.json"
 ZIPCODE = "560085"
-CHECK_INTERVAL = 10  # seconds
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
 def check_croma_availability(item_id: str, zip_code: str) -> bool:
     url = "https://api.croma.com/inventory/oms/v2/tms/details-pwa/"
@@ -61,6 +58,8 @@ def check_croma_availability(item_id: str, zip_code: str) -> bool:
         response = requests.post(url, headers=headers, json=payload, timeout=10)
         response.raise_for_status()
         data = response.json()
+
+        # Success → promiseLine list is non-empty
         promise_lines = (
             data.get("promise", {})
                 .get("suggestedOption", {})
@@ -68,35 +67,36 @@ def check_croma_availability(item_id: str, zip_code: str) -> bool:
                 .get("promiseLines", {})
                 .get("promiseLine", [])
         )
+        
         return len(promise_lines) > 0
-    except requests.exceptions.RequestException as e:
-        logging.warning(f"Request error for item {item_id}: {e}")
-    except Exception as e:
-        logging.error(f"Error for item {item_id}: {e}")
-    return False
 
-def load_products():
-    with open(PRODUCTS_FILE, "r") as f:
-        return json.load(f)
+    except Exception as e:
+        print(f"Error for item {item_id}: {e}")
+        return False
+
 
 def check_all_stock(zip_code):
-    products = load_products()
+    # Load products.json
+    with open(PRODUCTS_FILE, "r") as f:
+        products = json.load(f)
+
+    # Iterate over products
     for product in products:
         if not product.get("enabled", False):
-            continue
+            continue  # skip disabled products
+
         item_id = product["id"]
         name = product["name"]
+
         in_stock = check_croma_availability(item_id=item_id, zip_code=zip_code)
         if in_stock:
-            logging.info(f"✅ In stock: {name} (ID: {item_id}) for Pincode: {zip_code}")
+            print(f"✅ In stock: {name} (ID: {item_id}) for Pincode: {zip_code}")
         else:
-            logging.info(f"❌ Out of stock: {name} (ID: {item_id}) for Pincode: {zip_code}")
+            print(f"❌ Out of stock: {name} (ID: {item_id}) for Pincode: {zip_code}")
+
 
 if __name__ == "__main__":
-    try:
-        while True:
-            check_all_stock(zip_code=ZIPCODE)
-            logging.info("CHECKED ALL\n")
-            time.sleep(CHECK_INTERVAL)
-    except KeyboardInterrupt:
-        logging.info("Script stopped by user.")
+    while 1:
+        check_all_stock(zip_code=ZIPCODE)
+        print("CHECKED ALL\n")
+        time.sleep(10)
